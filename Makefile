@@ -13,6 +13,31 @@ up: pull build
 	make ps
 ps:
 	docker compose ps
+proto:
+	@docker run --rm \
+		-v "$$(pwd)/proto:/proto" \
+		-v "$$(pwd)/services:/services" \
+		-v "$$(pwd)/gateway:/gateway" \
+		python:3.13 bash -c " \
+		pip install -q grpcio-tools && \
+		for service in user product order; do \
+			rm -rf /services/\$$service/src/generated && \
+			mkdir -p /services/\$$service/src/generated && \
+			python -m grpc_tools.protoc -I/proto/\$$service \
+				--python_out=/services/\$$service/src/generated \
+				--grpc_python_out=/services/\$$service/src/generated \
+				/proto/\$$service/\$$service.proto && \
+			sed -i \"s/^import \(.*\)_pb2 as/from . import \1_pb2 as/\" /services/\$$service/src/generated/\$${service}_pb2_grpc.py && \
+			touch /services/\$$service/src/generated/__init__.py; \
+		done && \
+		rm -rf /gateway/src/generated && \
+		mkdir -p /gateway/src/generated/user /gateway/src/generated/product /gateway/src/generated/order && \
+		for service in user product order; do \
+			python -m grpc_tools.protoc -I/proto/\$$service --python_out=/gateway/src/generated/\$$service --grpc_python_out=/gateway/src/generated/\$$service /proto/\$$service/\$$service.proto && \
+			sed -i \"s/^import \(.*\)_pb2 as/from . import \1_pb2 as/\" /gateway/src/generated/\$$service/\$${service}_pb2_grpc.py; \
+		done && \
+		touch /gateway/src/generated/__init__.py /gateway/src/generated/user/__init__.py /gateway/src/generated/product/__init__.py /gateway/src/generated/order/__init__.py && \
+		echo 'Proto files compiled successfully'"
 test: test.user test.product test.order
 test.user:
 	@docker compose run -T --rm user uv run pytest tests/ -v -s

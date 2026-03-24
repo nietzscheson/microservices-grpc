@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 from src.database import Base
-from src import app as _app  # noqa: F401 - ensures models are registered
+from src import models as _models  # noqa: F401 - ensures models are registered
 
 config = context.config
 

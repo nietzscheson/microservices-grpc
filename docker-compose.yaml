@@ -18,22 +18,21 @@ services:
   user:
     container_name: user
     build:
-      context: ./services
-      dockerfile: ./Dockerfile
+      context: .
+      dockerfile: ./services/Dockerfile
       target: user
-      args:
-        - NAME=user
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/users
+      GRPC_PORT: 50051
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail http://user:5000/graphql || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import grpc; ch=grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)\" || exit 1"]
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     volumes:
       - ./services/user:/services/user
     ports:
-      - 5001:5000
+      - 50051:50051
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,22 +40,21 @@ services:
   product:
     container_name: product
     build:
-      context: ./services
-      dockerfile: ./Dockerfile
+      context: .
+      dockerfile: ./services/Dockerfile
       target: product
-      args:
-        - NAME=product
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/products
+      GRPC_PORT: 50051
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail http://product:5000/graphql || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import grpc; ch=grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)\" || exit 1"]
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     volumes:
       - ./services/product:/services/product
     ports:
-      - 5002:5000
+      - 50052:50051
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,22 +62,21 @@ services:
   order:
     container_name: order
     build:
-      context: ./services
-      dockerfile: ./Dockerfile
+      context: .
+      dockerfile: ./services/Dockerfile
       target: order
-      args:
-        - NAME=order
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/orders
+      GRPC_PORT: 50051
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail http://order:5000/graphql || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import grpc; ch=grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=2)\" || exit 1"]
       interval: 5s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     volumes:
       - ./services/order:/services/order
     ports:
-      - 5003:5000
+      - 50053:50051
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,10 +84,17 @@ services:
   gateway:
     container_name: gateway
     build:
-      context: ./gateway
-      dockerfile: ./Dockerfile
+      context: .
+      dockerfile: ./gateway/Dockerfile
+      target: gateway
+    environment:
+      USER_SERVICE_URL: user:50051
+      PRODUCT_SERVICE_URL: product:50051
+      ORDER_SERVICE_URL: order:50051
     ports:
       - "4000:4000"
+    volumes:
+      - ./gateway:/gateway
     depends_on:
       user:
         condition: service_healthy

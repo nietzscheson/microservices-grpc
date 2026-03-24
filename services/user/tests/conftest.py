@@ -1,10 +1,13 @@
 import subprocess
 import pytest
-from fastapi.testclient import TestClient
+import grpc
+from concurrent import futures
 from sqlalchemy import text
 from src.database import Base
-from src.app import app, User
+from src.models import User
 from src.containers import MainContainer
+from src.generated import user_pb2_grpc
+from src.servicer import UserServiceServicer
 
 
 @pytest.fixture
@@ -36,12 +39,19 @@ def db(main_container, apply_migrations):
 
 
 @pytest.fixture()
-def client():
-    test_client = TestClient(app)
+def grpc_server():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
+    user_pb2_grpc.add_UserServiceServicer_to_server(UserServiceServicer(), server)
+    port = server.add_insecure_port("[::]:0")
+    server.start()
+    yield f"localhost:{port}"
+    server.stop(grace=0)
 
-    def _(query={}):
-        return test_client.post("/graphql", json=query)
-    return _
+
+@pytest.fixture()
+def client(grpc_server):
+    channel = grpc.insecure_channel(grpc_server)
+    return user_pb2_grpc.UserServiceStub(channel)
 
 
 @pytest.fixture()

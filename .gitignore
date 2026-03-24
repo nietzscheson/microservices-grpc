@@ -4,3 +4,4 @@ __pycache__
 .vscode/dryrun.log
 .vscode/targets.log
 db.sqlite
+**/src/generated/

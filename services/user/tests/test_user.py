@@ -1,92 +1,40 @@
+from src.generated import user_pb2
+
+
 def test_user_create(client):
+    response = client.CreateUser(user_pb2.CreateUserRequest(name="Isabella"))
 
-    response = client(query={
-        "query": """
-        mutation UserCreate($name: String!){
-            userCreate(name: $name){
-                id
-                name
-            }
-        }
-        """,
-        "variables": {"name": "Isabella"}}
-    )
-
-    data = response.json()["data"]
-
-    user = data["userCreate"]
-
-    assert user["id"] == str(1)
-    assert user["name"] == "Isabella"
+    assert response.id == 1
+    assert response.name == "Isabella"
 
 
 def test_user(client, add_user):
-
     user = add_user(name="Isabella")
 
-    response = client(query={
-        "query": """
-        query User($id: ID!){
-            user(id: $id){
-                id
-                name
-            }
-        }
-        """,
-        "variables": {"id": user.id}}
-    )
+    response = client.GetUser(user_pb2.GetUserRequest(id=user.id))
 
-    data = response.json()["data"]
+    assert response.id == 1
+    assert response.name == "Isabella"
 
-    user = data["user"]
-
-    assert user["id"] == str(1)
-    assert user["name"] == "Isabella"
-
-def test_user_representation(client, add_user):
-
-    user = add_user(name="Isabella")
-
-    response = client(query={
-        "query": """
-            query UserRepresentation($id: Int!){
-                _entities(representations: [{ __typename: "UserType", id: $id }]) {
-                ...on UserType {
-                    id
-                    name
-                }
-            }}
-        """,
-        "variables": {"id": user.id}}
-    )
-
-    data = response.json()["data"]
-
-    user = data["_entities"]
-
-    assert user[0]["id"] == str(1)
-    assert user[0]["name"] == "Isabella"
 
 def test_users(client, add_user):
-
     add_user(name="Isabella")
     add_user(name="Fernando")
 
-    response = client(query={
-        "query": """
-        query Users{
-            users{
-                id
-                name
-            }
-        }
-        """}
-    )
+    response = client.ListUsers(user_pb2.ListUsersRequest())
 
-    data = response.json()["data"]
+    assert len(response.users) == 2
+    assert response.users[0].name == "Isabella"
+    assert response.users[1].name == "Fernando"
 
-    users = data["users"]
 
-    assert len(users) == 2
-    assert users[0]["name"] == "Isabella"
-    assert users[1]["name"] == "Fernando"
+def test_users_batch(client, add_user):
+    add_user(name="Isabella")
+    add_user(name="Fernando")
+    add_user(name="Carlos")
+
+    response = client.GetUsersBatch(user_pb2.GetUsersBatchRequest(ids=[1, 3]))
+
+    assert len(response.users) == 2
+    assert response.users[0].name == "Isabella"
+    assert response.users[1].name == "Carlos"
