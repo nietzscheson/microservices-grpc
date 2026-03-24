@@ -10,41 +10,51 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONPATH=.
 
-FROM base AS user
+# Proto compilation stage
+FROM base AS proto-builder
+RUN pip install grpcio-tools
+COPY proto/ /proto/
+RUN mkdir -p /generated/user /generated/product /generated/order && \
+    for service in user product order; do \
+      python -m grpc_tools.protoc -I/proto/$service \
+        --python_out=/generated/$service --grpc_python_out=/generated/$service \
+        /proto/$service/$service.proto && \
+      sed -i "s/^import \(.*\)_pb2 as/from . import \1_pb2 as/" /generated/$service/${service}_pb2_grpc.py && \
+      touch /generated/$service/__init__.py; \
+    done
 
-ARG NAME
-ENV NAME=$NAME
+FROM base AS user
 
 WORKDIR /services/user
 
-COPY user/pyproject.toml ./
+COPY services/user/pyproject.toml ./
 
 RUN uv sync --no-install-project
 
-CMD ["uv", "run", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5000"]
+COPY --from=proto-builder /generated/user/ ./src/generated/
+
+CMD ["uv", "run", "python", "-m", "src.server"]
 
 FROM base AS product
 
-ARG NAME
-ENV NAME=$NAME
-
 WORKDIR /services/product
 
-COPY product/pyproject.toml ./
+COPY services/product/pyproject.toml ./
 
 RUN uv sync --no-install-project
 
-CMD ["uv", "run", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5000"]
+COPY --from=proto-builder /generated/product/ ./src/generated/
+
+CMD ["uv", "run", "python", "-m", "src.server"]
 
 FROM base AS order
 
-ARG NAME
-ENV NAME=$NAME
-
 WORKDIR /services/order
 
-COPY order/pyproject.toml ./
+COPY services/order/pyproject.toml ./
 
 RUN uv sync --no-install-project
 
-CMD ["uv", "run", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5000"]
+COPY --from=proto-builder /generated/order/ ./src/generated/
+
+CMD ["uv", "run", "python", "-m", "src.server"]

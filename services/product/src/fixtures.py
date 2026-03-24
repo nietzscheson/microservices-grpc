@@ -1,5 +1,5 @@
 from src.containers import MainContainer
-from src.app import Product
+from src.models import Product
 
 container = MainContainer()
 Session = container.session()

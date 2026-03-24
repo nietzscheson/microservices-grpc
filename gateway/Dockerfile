@@ -1,20 +1,39 @@
-FROM node:22-slim
+FROM python:3.13 AS base
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# Install Rover CLI
-RUN npm install -g @apollo/rover@latest
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONFAULTHANDLER=1
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONPATH=.
 
-# Install Apollo Router v2
-WORKDIR /tmp
-RUN curl -sSL https://router.apollo.dev/download/nix/v2.12.0 | sh && \
-    mv /tmp/router /usr/local/bin/router
+# Proto compilation stage
+FROM base AS proto-builder
+RUN pip install grpcio-tools
+COPY proto/ /proto/
+RUN mkdir -p /generated/user /generated/product /generated/order && \
+    for service in user product order; do \
+      python -m grpc_tools.protoc -I/proto/$service \
+        --python_out=/generated/$service --grpc_python_out=/generated/$service \
+        /proto/$service/$service.proto && \
+      sed -i "s/^import \(.*\)_pb2 as/from . import \1_pb2 as/" /generated/$service/${service}_pb2_grpc.py && \
+      touch /generated/$service/__init__.py; \
+    done
 
-WORKDIR /app
+FROM base AS gateway
 
-COPY supergraph.yaml router.yaml entrypoint.sh ./
-RUN chmod +x entrypoint.sh
+WORKDIR /gateway
 
-EXPOSE 4000
+COPY gateway/pyproject.toml ./
 
-ENTRYPOINT ["./entrypoint.sh"]
+RUN uv sync --no-install-project
+
+COPY --from=proto-builder /generated/user/ ./src/generated/user/
+COPY --from=proto-builder /generated/product/ ./src/generated/product/
+COPY --from=proto-builder /generated/order/ ./src/generated/order/
+RUN touch ./src/generated/__init__.py
+
+CMD ["uv", "run", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "4000"]

@@ -1,5 +1,5 @@
 from src.containers import MainContainer
-from src.app import Order
+from src.models import Order
 
 container = MainContainer()
 Session = container.session()

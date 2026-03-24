@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package product;
+
+service ProductService {
+  rpc GetProduct (GetProductRequest) returns (ProductResponse);
+  rpc ListProducts (ListProductsRequest) returns (ListProductsResponse);
+  rpc CreateProduct (CreateProductRequest) returns (ProductResponse);
+  rpc GetProductsBatch (GetProductsBatchRequest) returns (ListProductsResponse);
+}
+
+message GetProductRequest {
+  int32 id = 1;
+}
+
+message CreateProductRequest {
+  string name = 1;
+  optional int32 created_by = 2;
+}
+
+message ListProductsRequest {
+  int32 page = 1;
+  int32 per_page = 2;
+  string sort_field = 3;
+  string sort_order = 4;
+}
+
+message GetProductsBatchRequest {
+  repeated int32 ids = 1;
+}
+
+message ProductResponse {
+  int32 id = 1;
+  string name = 2;
+  optional int32 created_by = 3;
+}
+
+message ListProductsResponse {
+  repeated ProductResponse products = 1;
+}

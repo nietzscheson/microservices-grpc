@@ -1,103 +1,44 @@
-def test_product_create(client):
+from src.generated import product_pb2
 
-    response = client(query={
-        "query": """
-        mutation ProductCreate($name: String!, $createdBy: Int!){
-            productCreate(name: $name, createdBy: $createdBy){
-                id
-                name
-                createdBy {
-                    id
-                }
-            }
-        }
-        """,
-        "variables": {"name": "T-Shirt", "createdBy": 1}}
+
+def test_product_create(client):
+    response = client.CreateProduct(
+        product_pb2.CreateProductRequest(name="T-Shirt", created_by=1)
     )
 
-    data = response.json()["data"]
-
-    product = data["productCreate"]
-
-    assert product["id"] == str(1)
-    assert product["name"] == "T-Shirt"
-    assert product["createdBy"]["id"] == str(1)
+    assert response.id == 1
+    assert response.name == "T-Shirt"
+    assert response.created_by == 1
 
 
 def test_product(client, add_product):
-
     product = add_product(name="Pants", created_by=1)
 
-    response = client(query={
-        "query": """
-        query Product($id: ID!){
-            product(id: $id){
-                id
-                name
-                createdBy{
-                    id
-                }
-            }
-        }
-        """,
-        "variables": {"id": product.id}}
-    )
+    response = client.GetProduct(product_pb2.GetProductRequest(id=product.id))
 
-    data = response.json()["data"]
+    assert response.id == 1
+    assert response.name == "Pants"
+    assert response.created_by == 1
 
-    product = data["product"]
-
-    assert product["id"] == str(1)
-    assert product["name"] == "Pants"
-    assert product["createdBy"]["id"] == str(1)
-
-def test_product_representation(client, add_product):
-
-    product = add_product(name="Pants")
-
-    response = client(query={
-        "query": """
-            query UserRepresentation($id: Int!){
-                _entities(representations: [{ __typename: "ProductType", id: $id }]) {
-                ...on ProductType {
-                    id
-                    name
-                }
-            }}
-        """,
-        "variables": {"id": product.id}}
-    )
-
-    data = response.json()["data"]
-
-    product = data["_entities"]
-
-    assert product[0]["id"] == str(1)
-    assert product[0]["name"] == "Pants"
 
 def test_products(client, add_product):
-
     add_product(name="T-Shirt", created_by=1)
     add_product(name="Pants", created_by=1)
 
-    response = client(query={
-        "query": """
-        query Products{
-            products{
-                id
-                name
-                createdBy{
-                    id
-                }
-            }
-        }
-        """}
-    )
+    response = client.ListProducts(product_pb2.ListProductsRequest())
 
-    data = response.json()["data"]
+    assert len(response.products) == 2
+    assert response.products[0].name == "T-Shirt"
+    assert response.products[1].name == "Pants"
 
-    products = data["products"]
 
-    assert len(products) == 2
-    assert products[0]["name"] == "T-Shirt"
-    assert products[1]["name"] == "Pants"
+def test_products_batch(client, add_product):
+    add_product(name="T-Shirt", created_by=1)
+    add_product(name="Bag", created_by=1)
+    add_product(name="Pants", created_by=1)
+
+    response = client.GetProductsBatch(product_pb2.GetProductsBatchRequest(ids=[1, 3]))
+
+    assert len(response.products) == 2
+    assert response.products[0].name == "T-Shirt"
+    assert response.products[1].name == "Pants"

@@ -1,71 +1,87 @@
-# Microservices Federation
+# Microservices gRPC
 
-A hands-on example of how to federate multiple microservices into a single GraphQL API using [Apollo Federation](https://www.apollographql.com/docs/federation/).
+A hands-on example of how to orchestrate multiple microservices using [gRPC](https://grpc.io/) with a REST API Gateway.
 
-Each microservice owns its own GraphQL schema and runs independently. Apollo Gateway composes them into a single unified graph, allowing clients to query across services transparently.
+Each microservice owns its own data and exposes a gRPC server. A Python/FastAPI gateway composes them into a single REST API, handling cross-service data enrichment — the same role Apollo Gateway played in the [GraphQL Federation version](https://github.com/nietzscheson/microservices-federation) of this project.
 
-![Microservices Federation](./docs/microservices-federation.png?raw=true "Graph of Microservices Federation")
+## Why an API Gateway?
 
-## Why Federation?
+In a microservices architecture with gRPC, each service communicates via Protocol Buffers over HTTP/2. But gRPC is not browser-friendly, and clients shouldn't need to know which service owns which data. The API Gateway solves this by:
 
-In a microservices architecture, each service typically exposes its own API. This forces clients to know which service owns which data and to orchestrate multiple requests. Apollo Federation solves this by:
+1. **Each service defines its own `.proto` contract** — the User service knows about users, the Product service knows about products, the Order service knows about orders.
+2. **Services stay decoupled** — they never call each other directly. Cross-service references are stored as integer IDs (e.g., `created_by = 1`).
+3. **The Gateway orchestrates and composes** — it translates REST requests into gRPC calls, fetches data from multiple services, and returns a single enriched JSON response.
 
-1. **Each service defines its own schema** — the User service knows about users, the Product service knows about products, the Order service knows about orders.
-2. **Services extend types from other services** — the Product service can add a `createdBy` field that references the `UserType` defined in the User service, without depending on it directly.
-3. **The Gateway composes everything** — Apollo Gateway introspects all subgraph schemas, merges them into a single supergraph, and routes incoming queries to the right services automatically.
+For example, when a client requests `GET /orders/1`:
 
-The result: clients see **one unified GraphQL API** while each team maintains its own independent service.
+1. The Gateway calls **Order service** via gRPC → gets `{ id: 1, name: "###-001", created_by: 1, product: 1 }`
+2. The Gateway calls **User service** via gRPC → resolves `{ id: 1, name: "Admin" }`
+3. The Gateway calls **Product service** via gRPC → resolves `{ id: 1, name: "T-Shirt", created_by: 1 }`
+4. The Gateway calls **User service** again → resolves the product's creator
+5. The Gateway composes and returns the full response:
+
+```json
+{
+  "id": 1,
+  "name": "###-001",
+  "created_by": { "id": 1, "name": "Admin" },
+  "product": {
+    "id": 1,
+    "name": "T-Shirt",
+    "created_by": { "id": 1, "name": "Admin" }
+  }
+}
+```
+
+For list endpoints, the Gateway uses **batch RPCs** (`GetUsersBatch`, `GetProductsBatch`) to minimize round-trips.
 
 ### Services
 
-| Service   | Port | Description                                      |
-|-----------|------|--------------------------------------------------|
-| Gateway   | 4000 | Apollo Gateway — composes all subgraphs           |
-| User      | 5001 | Manages users (`UserType`)                        |
-| Product   | 5002 | Manages products, references `UserType` via `createdBy` |
-| Order     | 5003 | Manages orders, references `UserType` and `ProductType` |
+| Service   | Port  | Protocol | Description                                      |
+|-----------|-------|----------|--------------------------------------------------|
+| Gateway   | 4000  | REST     | FastAPI — orchestrates gRPC calls, composes data  |
+| User      | 50051 | gRPC     | Manages users                                    |
+| Product   | 50052 | gRPC     | Manages products, references users via `created_by` |
+| Order     | 50053 | gRPC     | Manages orders, references users and products    |
 
-### How Federation connects the services
+### Proto definitions
 
-The **User service** defines the `UserType` as a federation entity with a key:
+Each service has a `.proto` file in the `proto/` directory:
 
-```python
-@strawberry.federation.type(keys=["id"])
-class UserType:
-    id: strawberry.ID
-    name: str
+```protobuf
+// proto/user/user.proto
+service UserService {
+  rpc GetUser (GetUserRequest) returns (UserResponse);
+  rpc ListUsers (ListUsersRequest) returns (ListUsersResponse);
+  rpc CreateUser (CreateUserRequest) returns (UserResponse);
+  rpc GetUsersBatch (GetUsersBatchRequest) returns (ListUsersResponse);
+}
 ```
 
-The **Product service** doesn't import from the User service. Instead, it declares a stub `UserType` and references it:
-
-```python
-@strawberry.federation.type(keys=["id"])
-class UserType:
-    id: strawberry.ID = strawberry.federation.field
-
-@strawberry.federation.type(keys=["id"])
-class ProductType:
-    id: strawberry.ID
-    name: str
-
-    @strawberry.field
-    def created_by(self) -> typing.Optional[UserType]:
-        return UserType(id=self._created_by)
+```protobuf
+// proto/product/product.proto
+service ProductService {
+  rpc GetProduct (GetProductRequest) returns (ProductResponse);
+  rpc ListProducts (ListProductsRequest) returns (ListProductsResponse);
+  rpc CreateProduct (CreateProductRequest) returns (ProductResponse);
+  rpc GetProductsBatch (GetProductsBatchRequest) returns (ListProductsResponse);
+}
 ```
 
-When a client queries `product { createdBy { name } }` through the Gateway:
-1. The Gateway sends the product query to the **Product service**, which returns `createdBy: { id: 1 }`
-2. The Gateway recognizes `UserType` is owned by the **User service** and sends a `_entities` lookup with `{ __typename: "UserType", id: 1 }`
-3. The **User service** resolves the full user via `resolve_reference` and returns `{ id: 1, name: "Admin" }`
-4. The Gateway merges the results and returns the complete response to the client
-
-This is the power of federation — **services stay decoupled while the graph stays unified**.
+```protobuf
+// proto/order/order.proto
+service OrderService {
+  rpc GetOrder (GetOrderRequest) returns (OrderResponse);
+  rpc ListOrders (ListOrdersRequest) returns (ListOrdersResponse);
+  rpc CreateOrder (CreateOrderRequest) returns (OrderResponse);
+}
+```
 
 ## Tech Stack
 
-- **Gateway**: Node.js, Apollo Gateway, Apollo Server
-- **Microservices**: Python 3.13, FastAPI, Strawberry GraphQL (Federation 2)
-- **Database**: SQLAlchemy + Alembic (SQLite)
+- **Gateway**: Python 3.13, FastAPI, Uvicorn
+- **Microservices**: Python 3.13, gRPC, Protocol Buffers
+- **Database**: PostgreSQL 17.4, SQLAlchemy + Alembic
 - **DI Container**: dependency-injector + pydantic-settings
 - **Package Manager**: uv
 - **Infrastructure**: Docker Compose
@@ -81,14 +97,14 @@ This is the power of federation — **services stay decoupled while the graph st
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/nietzscheson/microservices-federation
-cd microservices-federation
+git clone https://github.com/nietzscheson/microservices-grpc
+cd microservices-grpc
 ```
 
 2. Build and start all services:
 
 ```bash
-make
+make up
 ```
 
 3. Verify containers are running:
@@ -98,10 +114,11 @@ make ps
 ```
 
 ```
-Container user      Running (healthy)   0.0.0.0:5001->5000/tcp
-Container product   Running (healthy)   0.0.0.0:5002->5000/tcp
-Container order     Running (healthy)   0.0.0.0:5003->5000/tcp
-Container gateway   Running             0.0.0.0:4000->80/tcp
+Container postgres   Running (healthy)   0.0.0.0:6543->5432/tcp
+Container user       Running (healthy)   0.0.0.0:50051->50051/tcp
+Container product    Running (healthy)   0.0.0.0:50052->50051/tcp
+Container order      Running (healthy)   0.0.0.0:50053->50051/tcp
+Container gateway    Running             0.0.0.0:4000->4000/tcp
 ```
 
 4. Apply database migrations:
@@ -116,35 +133,48 @@ make upgrade
 make fixtures
 ```
 
-### Endpoints
+### REST API Endpoints
 
-| Endpoint | URL |
-|----------|-----|
-| Unified Graph (Gateway) | [localhost:4000/graphql](http://localhost:4000/graphql) |
-| User Service | [localhost:5001/graphql](http://localhost:5001/graphql) |
-| Product Service | [localhost:5002/graphql](http://localhost:5002/graphql) |
-| Order Service | [localhost:5003/graphql](http://localhost:5003/graphql) |
+| Method | Endpoint            | Description                              |
+|--------|---------------------|------------------------------------------|
+| GET    | `/users`            | List all users                           |
+| GET    | `/users/{id}`       | Get user by ID                           |
+| POST   | `/users`            | Create user (`{ "name": "..." }`)        |
+| GET    | `/products`         | List products (enriched with creator)    |
+| GET    | `/products/{id}`    | Get product by ID (enriched with creator)|
+| POST   | `/products`         | Create product                           |
+| GET    | `/orders`           | List orders (enriched with user + product)|
+| GET    | `/orders/{id}`      | Get order by ID (enriched with user + product)|
+| POST   | `/orders`           | Create order                             |
 
-### Try a federated query
+### Try it
 
-Open [localhost:4000/graphql](http://localhost:4000/graphql) and run:
+```bash
+# List users
+curl localhost:4000/users
 
-```graphql
-query {
-  products {
-    id
-    name
-    createdBy {
-      id
-      name
-    }
-  }
-}
+# Get a product with its creator
+curl localhost:4000/products/1
+
+# Get an order with full composition (user + product + product's creator)
+curl localhost:4000/orders/1
+
+# Create a new user
+curl -X POST localhost:4000/users -H "Content-Type: application/json" -d '{"name": "New User"}'
+
+# Create an order with relationships
+curl -X POST localhost:4000/orders -H "Content-Type: application/json" -d '{"name": "###-004", "created_by": 1, "product": 1}'
 ```
 
-This single query hits the **Product service** for products and the **User service** for the `createdBy` user — composed transparently by the Gateway.
-
 ## Development
+
+### Compile proto files
+
+After modifying `.proto` files, regenerate the Python stubs:
+
+```bash
+make proto
+```
 
 ### Run tests
 
@@ -178,24 +208,35 @@ make migrate
 
 ```
 .
-├── gateway/                    # Apollo Gateway (Node.js)
-│   ├── server.js
-│   ├── package.json
+├── proto/                         # Protocol Buffer definitions
+│   ├── user/user.proto
+│   ├── product/product.proto
+│   └── order/order.proto
+├── gateway/                       # REST API Gateway (Python/FastAPI)
+│   ├── pyproject.toml
+│   ├── src/
+│   │   ├── app.py                 # REST endpoints with data composition
+│   │   ├── settings.py            # gRPC service URLs
+│   │   ├── clients.py             # gRPC stub factories
+│   │   └── generated/             # Compiled proto stubs (all 3 services)
 │   └── Dockerfile
 ├── services/
-│   ├── Dockerfile              # Multi-stage build for all Python services
+│   ├── Dockerfile                 # Multi-stage build for all Python services
 │   ├── user/
-│   │   ├── pyproject.toml      # Dependencies (managed by uv)
+│   │   ├── pyproject.toml
 │   │   ├── alembic.ini
 │   │   ├── src/
-│   │   │   ├── app.py          # FastAPI app, models, GraphQL schema
-│   │   │   ├── settings.py     # pydantic-settings configuration
-│   │   │   ├── containers.py   # dependency-injector container
-│   │   │   └── database.py     # SQLAlchemy Base
+│   │   │   ├── models.py          # SQLAlchemy models
+│   │   │   ├── servicer.py        # gRPC service implementation
+│   │   │   ├── server.py          # gRPC server bootstrap
+│   │   │   ├── settings.py        # pydantic-settings configuration
+│   │   │   ├── containers.py      # dependency-injector container
+│   │   │   ├── database.py        # SQLAlchemy Base
+│   │   │   └── generated/         # Compiled proto stubs
 │   │   ├── migrations/
 │   │   └── tests/
-│   ├── product/                # Same structure as user
-│   └── order/                  # Same structure as user
+│   ├── product/                   # Same structure as user
+│   └── order/                     # Same structure as user
 ├── docker-compose.yaml
 └── Makefile
 ```
