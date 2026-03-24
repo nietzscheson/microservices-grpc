@@ -1,0 +1,17 @@
+{
+  "name": "microservice-federation",
+  "version": "0.2.0",
+  "description": "Microservice Federation 0.2.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "author": "Cristian Angulo Nova <cristianangulonova@gmail.com>",
+  "license": "ISC",
+  "dependencies": {
+    "@apollo/gateway": "2.13.3",
+    "@apollo/server": "4.11.3",
+    "graphql": "16.10.0"
+  }
+}
